@@ -1,60 +1,116 @@
-import React, { useState } from 'react';
-import { StyleSheet, Text, View, TouchableOpacity, Vibration } from 'react-native';
-import { Entypo } from '@expo/vector-icons';
+import { NavigationContainer } from "@react-navigation/native";
+import { createNativeStackNavigator } from "@react-navigation/native-stack";
+import { useEffect, useMemo, useReducer, useCallback } from "react";
+import { Alert } from "react-native";
+import Onboarding from "./screens/Onboarding";
+import Profile from "./screens/Profile";
+import SplashScreen from "./screens/SplashScreen";
+import Home from "./screens/Home";
+import { StatusBar } from "expo-status-bar";
 
-export default function App() {
-  const [darkMode, setDarkMode] = useState(false);
-  const [currentNumber, setCurrentNumber] = useState('');
-  const [lastNumber, setLastNumber] = useState('');
+import AsyncStorage from "@react-native-async-storage/async-storage";
 
-  const buttons = ['C', 'DEL', '/', 7, 8, 9, '*', 4, 5, 6, '-', 1, 2, 3, '+', 0, '.', '='];
+import { AuthContext } from "./contexts/AuthContext";
 
-  function calculator() {
-    const lastChar = currentNumber[currentNumber.length - 1];
+const Stack = createNativeStackNavigator();
 
-    if ('/*-+'.includes(lastChar) || lastChar === '.') {
-      setCurrentNumber(currentNumber);
-    } else {
-      const result = eval(currentNumber).toString();
-      setCurrentNumber(result);
+export default function App({ navigation }) {
+  const [state, dispatch] = useReducer(
+    (prevState, action) => {
+      switch (action.type) {
+        case "onboard":
+          return {
+            ...prevState,
+            isLoading: false,
+            isOnboardingCompleted: action.isOnboardingCompleted,
+          };
+        default:
+          return prevState; // Add a default case to return prevState for safety
+      }
+    },
+    {
+      isLoading: true,
+      isOnboardingCompleted: false,
     }
+  );
+
+  const checkOnboardingStatus = async () => {
+    let profileData = {};
+    try {
+      const getProfile = await AsyncStorage.getItem("profile");
+      if (getProfile !== null) {
+        profileData = JSON.parse(getProfile);
+      }
+    } catch (e) {
+      console.error(e);
+    } finally {
+      const isOnboardingCompleted = Object.keys(profileData).length !== 0;
+      dispatch({ type: "onboard", isOnboardingCompleted });
+    }
+  };
+
+  useEffect(() => {
+    checkOnboardingStatus();
+  }, []);
+
+  const saveProfileData = async (data) => {
+    try {
+      const jsonValue = JSON.stringify(data);
+      await AsyncStorage.setItem("profile", jsonValue);
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  const authContext = useMemo(
+    () => ({
+      onboard: async (data) => {
+        await saveProfileData(data);
+        dispatch({ type: "onboard", isOnboardingCompleted: true });
+      },
+      update: async (data) => {
+        await saveProfileData(data);
+        Alert.alert("Success", "Successfully saved changes!");
+      },
+      logout: async () => {
+        try {
+          await AsyncStorage.clear();
+        } catch (e) {
+          console.error(e);
+        }
+        dispatch({ type: "onboard", isOnboardingCompleted: false });
+      },
+    }),
+    []
+  );
+
+  if (state.isLoading) {
+    return <SplashScreen />;
   }
-
-  function handleInput(buttonPressed) {
-    if ('/*-+'.includes(buttonPressed)) {
-      Vibration.vibrate(35);
-      setCurrentNumber(currentNumber + buttonPressed);
-    } else if (/^[0-9.]+$/.test(buttonPressed)) {
-      Vibration.vibrate(35);
-    }
-
-    switch (buttonPressed) {
-      case 'DEL':
-        Vibration.vibrate(35);
-        setCurrentNumber(currentNumber.slice(0, -1));
-        break;
-      case 'C':
-        Vibration.vibrate(35);
-        setLastNumber('');
-        setCurrentNumber('');
-        break;
-      case '=':
-        Vibration.vibrate(35);
-        setLastNumber(currentNumber + '=');
-        calculator();
-        break;
-      default:
-        setCurrentNumber(currentNumber + buttonPressed);
-    }
-  }
-
-  const styles = StyleSheet.create({
-    // Your existing styles here
-  });
 
   return (
-    <View>
-      {/* Rest of the JSX remains the same */}
-    </View>
+    <AuthContext.Provider value={authContext}>
+      <StatusBar style="dark" />
+      <NavigationContainer>
+        <Stack.Navigator>
+          {state.isOnboardingCompleted ? (
+            <>
+              <Stack.Screen
+                name="Home"
+                component={Home}
+                options={{ headerShown: false }}
+              />
+              <Stack.Screen name="Profile" component={Profile} />
+            </>
+          ) : (
+            <Stack.Screen
+              name="Onboarding"
+              component={Onboarding}
+              options={{ headerShown: false }}
+            />
+          )}
+        </Stack.Navigator>
+      </NavigationContainer>
+    </AuthContext.Provider>
   );
 }
